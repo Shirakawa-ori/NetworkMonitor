@@ -1,6 +1,19 @@
 # -*- coding: utf-8 -*-
 import pcap
 import dpkt
+import time
+import redis
+
+def conn_redis(redis_host,redis_port,redis_db):
+    return redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db)
+
+def get_time_stamp():
+    ct = time.time()
+    local_time = time.localtime(ct)
+    data_head = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
+    data_secs = (ct - long(ct)) * 1000
+    time_stamp = "%s.%03d" % (data_head, data_secs)
+    return time_stamp
 
 class cou():
     def __init__(self):
@@ -48,13 +61,18 @@ def toip(ip):
     return '.'.join('%s' % n for n in ip)
 
 if __name__ == '__main__' :
+    redis_db = 0
+    rs = conn_redis('localhost','6379', str(redis_db))
     c = cou()
     sniffer = pcap.pcap('ens192')
     sniffer.setfilter('tcp')
+    count = 0
     try :
         for packet_time,packet_data in sniffer :
             print '>'*90
+            count += 1
             try :
+                t = get_time_stamp()
                 packet = dpkt.ethernet.Ethernet(packet_data)
                 src_ip = tuple(map(ord,list(packet.data.src)))
                 src_port = packet.data.data.sport
@@ -62,17 +80,16 @@ if __name__ == '__main__' :
                 dst_port = packet.data.data.dport
                 data_len = len(packet_data)
                 data_data_len = len(packet.data.data.data)
-
                 if (src_ip[0] == 192):
                     c.src_add(toip(src_ip),1)
                 else :
                     pass
-
                 if (toip(src_ip) == '127.0.0.1'):
                     pass
                 else :
                     print 'SRC:%s:%s' % (toip(src_ip),src_port)
                     print 'DST:%s:%s' % (toip(dst_ip),dst_port)
+                    '''
                     print 'DATA LEN:%d' % data_len
                     print 'dpkt DATA LEN:%d' % data_data_len
                     #table_print(str_to_hex(packet_data))
@@ -80,8 +97,21 @@ if __name__ == '__main__' :
                         pass
                     else :
                         table_print(str_to_hex(packet.data.data.data))
+                    '''
                     print '<'*90
                     print
+                if count == 10001:
+                   redis_db += 1
+                   count = 1
+                   rs = conn_redis('localhost','6379', str(redis_db))
+                else :
+                   pass
+                if redis_db == 16:
+                   redis_db = 0
+                   rs = conn_redis('localhost','6379', str(redis_db))
+                else :
+                   pass
+                rs.hmset(count,{'src_ip':toip(src_ip),'src_port':src_port,'dst_ip':toip(dst_ip),'dst_port':dst_port,'data_len':data_len,'data':packet_data,'time':t})
             except KeyboardInterrupt :
                 print 'KeyboardInterrupt'
                 c.get_table()

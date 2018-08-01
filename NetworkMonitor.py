@@ -4,8 +4,39 @@ import dpkt
 import time
 import redis
 
-def conn_redis(redis_host,redis_port,redis_db):
-    return redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db)
+class redis_election():
+    def __init__(self):
+        self.redis_host = '127.0.0.1'
+        self.redis_port = 6379
+        self.redis_db = -1
+        self.lock_dic = dict.fromkeys(range(32), 0)
+    def conn_redis(self):
+        return redis.StrictRedis(host=self.redis_host, port=self.redis_port, db=self.redis_db)
+    def get_rs(self):
+        self.redis_db += 1
+        if self.redis_db < len(self.lock_dic) :
+            pass
+        else :
+            self.redis_db = 0
+        if 0 in self.lock_dic.values() :
+            pass
+        else :
+           print 'DB Poll Full'
+           return self.rs
+        if self.lock_dic[self.redis_db] != 1:
+            self.rs = self.conn_redis()
+            if self.rs.get('lock') != 1:
+                self.rs.set('lock',1)
+                self.lock_dic[self.redis_db] = 1
+            else :
+                self.get_rs()
+                self.lock_dic[self.redis_db] = 1
+        else :
+            self.get_rs()
+        return self.rs
+    def give_back(self):
+        self.lock_dic[self.redis_db] = 0
+        self.rs.set('lock',0)
 
 def get_time_stamp():
     ct = time.time()
@@ -61,8 +92,8 @@ def toip(ip):
     return '.'.join('%s' % n for n in ip)
 
 if __name__ == '__main__' :
-    redis_db = 0
-    rs = conn_redis('localhost','6379', str(redis_db))
+    rse = redis_election()
+    rs = rse.get_rs()
     c = cou()
     sniffer = pcap.pcap('ens192')
     sniffer.setfilter('tcp')
@@ -101,24 +132,21 @@ if __name__ == '__main__' :
                     print '<'*90
                     print
                 if count == 10001:
-                   redis_db += 1
-                   count = 1
-                   rs = conn_redis('localhost','6379', str(redis_db))
-                else :
-                   pass
-                if redis_db == 16:
-                   redis_db = 0
-                   rs = conn_redis('localhost','6379', str(redis_db))
+                    count = 1
+                    rse.give_back()
+                    rs = rse.get_rs()
                 else :
                    pass
                 rs.hmset(count,{'src_ip':toip(src_ip),'src_port':src_port,'dst_ip':toip(dst_ip),'dst_port':dst_port,'data_len':data_len,'data':packet_data,'time':t})
             except KeyboardInterrupt :
+                rse.give_back()
                 print 'KeyboardInterrupt'
                 c.get_table()
                 exit(0)
             except Exception ,e:
                 print '>>>>except,%s<<<<' % str(e)
     except KeyboardInterrupt :
+        rse.give_back()
         print 'KeyboardInterrupt'
         c.get_table()
         exit(0)
